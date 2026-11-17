@@ -1,0 +1,93 @@
+#!/bin/bash --login
+
+#SBATCH -p gpuL    # request GPU partition
+#SBATCH -G 1       # 1 gpu
+#SBATCH -n 1       # 1 task
+#SBATCH -c 12      # 12 cores
+#SBATCH -t 4-0     # 4 day time limit
+
+# use wildcards to recreate the SGE names
+#SBATCH -o %x.o%j
+#SBATCH -e %x.e%j
+
+####### SETUP ENVIRONMENT
+module purge
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+source activate phd
+
+####### DEFINE PARAMETERS
+
+python_file="preprocess_image.py"
+home=$SLURM_SUBMIT_DIR
+command="python $python_file"
+pipeline_use="greedy" # TODO change pipeline here
+standardise=0 # TODO change standardisation here
+
+####### PRE EXPERIMENT
+
+# make directory structure on node
+mkdir $TMPDIR/$SLURM_JOB_ID/ # make new dir in tmp
+mkdir "$TMPDIR/$SLURM_JOB_ID/aus_qcl2026_processed"
+mkdir "$TMPDIR/$SLURM_JOB_ID/qcl2026_processed"
+mkdir "$TMPDIR/$SLURM_JOB_ID/qcl2026_processed/spectral"
+mkdir "$TMPDIR/$SLURM_JOB_ID/aus_qcl2026_processed/spectral"
+
+# Copy over annotations and masks (these don't need to be generated)
+cp -r "/mnt/eps01-rds/GardnerLab/aus_qcl2026_raw/annotation" "$TMPDIR/$SLURM_JOB_ID/aus_qcl2026_processed"
+cp -r "/mnt/eps01-rds/GardnerLab/aus_qcl2026_raw/mask" "$TMPDIR/$SLURM_JOB_ID/aus_qcl2026_processed"
+cp -r "/mnt/eps01-rds/GardnerLab/qcl2026_raw/annotation" "$TMPDIR/$SLURM_JOB_ID/qcl2026_processed"
+cp -r "/mnt/eps01-rds/GardnerLab/qcl2026_raw/mask" "$TMPDIR/$SLURM_JOB_ID/qcl2026_processed"
+cp -r "/mnt/eps01-rds/GardnerLab/qcl2026_raw/mask" "$TMPDIR/$SLURM_JOB_ID/qcl2026_processed"
+cp -r "/mnt/eps01-rds/GardnerLab/qcl2026_raw/wavenumbers.npy" "$TMPDIR/$SLURM_JOB_ID/"
+
+# Copy over data sheets
+cp "/mnt/eps01-rds/GardnerLab/qcl2026_raw/master_sheet_only_annotated.xlsx" "$TMPDIR/$SLURM_JOB_ID/qcl2026_processed/master_sheet.xlsx"
+cp "/mnt/eps01-rds/GardnerLab/aus_qcl2026_raw/master_sheet.xlsx" "$TMPDIR/$SLURM_JOB_ID/aus_qcl2026_processed/"
+
+# Copy over experiment code files
+cp -r /mnt/iusers01/eee01/w37262do/scratch/IR_preprocessing/src/ $TMPDIR/$SLURM_JOB_ID/ # copy source repo
+cp -r /mnt/iusers01/eee01/w37262do/scratch/IR_preprocessing/PyIR/ $TMPDIR/$SLURM_JOB_ID/ # copy source repo
+cp /mnt/iusers01/eee01/w37262do/scratch/IR_preprocessing/*.py $TMPDIR/$SLURM_JOB_ID/ # copy code files
+
+# cd to node
+cd $TMPDIR/$SLURM_JOB_ID/
+
+
+####### RUN EXPERIMENT - PREPROCESSING STAGE
+
+pwd
+echo "$command $pipeline_use" # denoise # wax remove # baseline # derivative # normalisation
+# e.g.: eval "$command $pipeline_use" sg none asls none vectornorm
+eval "$command $pipeline_use" none none none none none # TODO include PREPROCESSING args here
+
+####### SETUP FINETUNE EXPERIMENT
+
+# redefine environment variables
+python_file="unet_classify.py"
+command="python $python_file"
+
+####### RUN EXPERIMENT - FINETUNE STAGE
+
+pwd
+echo "$command" "seed" # argv[1] is seed, argv[2] is standardise 0/1
+eval "$command" 0 "$standardise"
+eval "$command" 1 "$standardise"
+eval "$command" 2 "$standardise"
+eval "$command" 3 "$standardise"
+eval "$command" 5 "$standardise"
+eval "$command" 8 "$standardise"
+eval "$command" 13 "$standardise"
+eval "$command" 21 "$standardise"
+eval "$command" 34 "$standardise"
+eval "$command" 55 "$standardise"
+
+####### POST EXPERIMENT
+
+# Copy results to home
+cp ./*.png $home
+cp ./*.txt $home
+
+# For reference, I copied from these sources:
+# https://ri.itservices.manchester.ac.uk/csf3/getting-started/tutorial/
+# https://ri.itservices.manchester.ac.uk/csf3/software/applications/anaconda-python/
+
